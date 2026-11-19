@@ -1,0 +1,25 @@
+name: train
+on: workflow_dispatch
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          pip install "numpy<2" scipy soundfile onnxruntime piper-tts==1.2.0 openwakeword
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: vozes
+        run: |
+          mkdir voices; cd voices
+          B=https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR
+          for v in faber/medium/pt_BR-faber-medium edresson/low/pt_BR-edresson-low cadu/medium/pt_BR-cadu-medium jeff/medium/pt_BR-jeff-medium; do
+            curl -sfLO $B/$v.onnx && curl -sfLO $B/$v.onnx.json || echo "sem $v"
+          done
+          ls
+      - run: python -c "import openwakeword.utils as u; u.download_models()"
+      - run: python train.py
+      - uses: actions/upload-artifact@v4
+        with: { name: lain, path: "out/" }
