@@ -1,0 +1,25 @@
+name: fixshape
+on: workflow_dispatch
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install onnx onnxsim onnxruntime
+      - name: baixar modelos
+        run: |
+          mkdir out
+          B=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
+          curl -sSfL -o emb.onnx $B/embedding_model.onnx
+          curl -sSfL -o mel.onnx $B/melspectrogram.onnx
+      - name: fixar embedding
+        run: onnxsim emb.onnx out/embedding_fixed.onnx --overwrite-input-shape input_1:1,76,32,1
+      - name: fixar mel (pode falhar)
+        continue-on-error: true
+        run: onnxsim mel.onnx out/mel_fixed.onnx --overwrite-input-shape input:1,1280
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixed
+          path: out/
