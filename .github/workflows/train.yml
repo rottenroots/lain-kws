@@ -9,7 +9,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: |
-          pip install "numpy<2" scipy soundfile onnxruntime piper-tts==1.2.0 openwakeword
+          pip install "numpy<2" onnx scipy soundfile onnxruntime piper-tts==1.2.0 openwakeword
           pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: vozes
         run: |

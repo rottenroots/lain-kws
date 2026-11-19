@@ -68,7 +68,7 @@ for v in VOICES:
                 w = tts(t, v, ls, ns)
                 if w is None or len(w) < 2000: continue
                 n+=1
-                for _ in range(8): X.append(make(w,True)); Y.append(1)
+                for _ in range(16): X.append(make(w,True)); Y.append(1)
 print("positivos TTS:", n)
 # positivos: sua voz
 if os.path.exists('data/lain_voz.wav'):
@@ -84,7 +84,7 @@ for v in VOICES:
             w = tts(t, v, ls, 0.667)
             if w is None: continue
             n+=1
-            for _ in range(6): X.append(make(w,False)); Y.append(0)
+            for _ in range(12): X.append(make(w,False)); Y.append(0)
 print("negativos TTS:", n)
 # negativos: sua voz
 if os.path.exists('data/neg_voz.wav'):
@@ -108,7 +108,7 @@ net = nn.Sequential(nn.Flatten(), nn.Linear(T*96,64), nn.ReLU(), nn.Dropout(0.3)
 opt = torch.optim.Adam(net.parameters(), 1e-3)
 Et, Yt = torch.tensor(E), torch.tensor(Y)
 wpos = float(min((Y==0).sum()/max(1,Y.sum()), 3))
-for ep in range(60):
+for ep in range(120):
     net.train(); p = np.random.permutation(tr)
     for i in range(0, len(p), 128):
         b = p[i:i+128]; o = net(Et[b]).squeeze(1)
