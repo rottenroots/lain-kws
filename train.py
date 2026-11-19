@@ -7,8 +7,8 @@ SR, WIN = 16000, 32000
 VOICES = glob.glob('voices/*.onnx')
 POS = ["Lain", "Láin"]
 NEGW = ["lein","lei","lã","Laila","ali","plain","lane","lá","laço","lanche","Lúcia","vai","Lauro",
-        "alô","ok","olha","Bolsonaro","main","gain","Elaine","lenha","linha","nada","claro"]
-NEGS = ["Que horas são agora","Abre o aplicativo de música","Eu vou sair daqui a pouco",
+        "alô","ai","aí","Laís","Lia","Lara","Lina","rain","pain","ok","olha","Bolsonaro","main","gain","Elaine","lenha","linha","nada","claro"]
+NEGS = ["Aí eu falei para ele","Laís chegou cedo","Aline foi embora","Lara e Lia saíram","Ainda não terminei","Maior que isso não tem","Que horas são agora","Abre o aplicativo de música","Eu vou sair daqui a pouco",
         "Liga a luz da sala","Não sei o que fazer hoje","Me lembra de comprar pão"]
 os.makedirs('out', exist_ok=True)
 
@@ -58,70 +58,94 @@ def segs(x, minl=0.15, maxl=1.2):
 def readwav(p):
     x, sr = sf.read(p, dtype='float32'); assert sr == SR; return x if x.ndim==1 else x[:,0]
 
-X, Y = [], []
-# positivos sinteticos
-n=0
+
+def readwav(p):
+    x, sr = sf.read(p, dtype='float32'); assert sr == SR; return x if x.ndim==1 else x[:,0]
+
+def make_raw(chunk):
+    x = chunk.astype(np.float32) * random.uniform(0.4, 3.0)
+    x = x + colored(len(x), random.choice([0,1,2])) * random.uniform(0, 0.01)
+    if random.random() < 0.3: x = sosfilt(HFP, x)
+    return (np.clip(x,-1,1)*32767).astype(np.int16)
+
+def windows(x, hop=8000):
+    return [x[i:i+WIN] for i in range(0, len(x)-WIN+1, hop)]
+
+X, Y, G = [], [], []
+def add(a, y, g): X.append(a); Y.append(y); G.append(g)
+
+# sinteticos
 for v in VOICES:
     for t in POS:
         for ls in [0.8,0.9,1.0,1.1,1.25]:
             for ns in [0.4,0.9]:
                 w = tts(t, v, ls, ns)
                 if w is None or len(w) < 2000: continue
-                n+=1
-                for _ in range(16): X.append(make(w,True)); Y.append(1)
-print("positivos TTS:", n)
-# positivos: sua voz
-if os.path.exists('data/lain_voz.wav'):
-    S = segs(readwav('data/lain_voz.wav'))
-    print("segmentos da sua voz:", len(S))
-    for w in S:
-        for _ in range(40): X.append(make(w,True)); Y.append(1)
-# negativos TTS
-n=0
-for v in VOICES:
+                for _ in range(8): add(make(w,True), 1, 'synth')
     for t in NEGW+NEGS:
         for ls in [0.9,1.0,1.15]:
             w = tts(t, v, ls, 0.667)
             if w is None: continue
-            n+=1
-            for _ in range(12): X.append(make(w,False)); Y.append(0)
-print("negativos TTS:", n)
-# negativos: sua voz
-if os.path.exists('data/neg_voz.wav'):
-    x = readwav('data/neg_voz.wav'); S = segs(x, 0.1, 1.9)
-    print("segmentos neg sua voz:", len(S))
-    for w in S:
-        for _ in range(30): X.append(make(w,False)); Y.append(0)
-# so ruido / silencio
-for _ in range(500): X.append(make(None,False)); Y.append(0)
+            for _ in range(6): add(make(w,False), 0, 'synth')
+for _ in range(300): add(make(None,False), 0, 'synth')
+print("sinteticos:", len(X))
 
-X = np.stack(X); Y = np.array(Y, np.float32)
-print("total:", len(X), "pos:", int(Y.sum()))
+# sua voz: positivos
+if os.path.exists('data/lain_voz.wav'):
+    S = segs(readwav('data/lain_voz.wav')); print("lain_voz segmentos:", len(S))
+    for w in S:
+        for _ in range(40): add(make(w,True), 1, 'voz')
+if os.path.exists('data/t_lain.wav'):
+    S = segs(readwav('data/t_lain.wav')); print("t_lain segmentos:", len(S))
+    for w in S:
+        for _ in range(8): add(make(w,True), 1, 't_lain')
+
+# sua voz: negativos longos (fala continua)
+if os.path.exists('data/neg_longo.wav'):
+    x = readwav('data/neg_longo.wav'); cut = int(len(x)*0.75)
+    for w in windows(x[:cut]):
+        for _ in range(4): add(make_raw(w), 0, 'neglong_train')
+    for w in windows(x[cut:]):
+        for _ in range(2): add(make_raw(w), 0, 'neglong_hold')
+if os.path.exists('data/t_neg.wav'):
+    for w in windows(readwav('data/t_neg.wav')):
+        for _ in range(2): add(make_raw(w), 0, 't_neg')
+
+X = np.stack(X); Y = np.array(Y, np.float32); G = np.array(G)
+for g in sorted(set(G)): print(f"grupo {g}: {(G==g).sum()} (pos={int(Y[G==g].sum())})")
 from openwakeword.utils import AudioFeatures
 F = AudioFeatures(inference_framework='onnx')
 E = F.embed_clips(X, batch_size=64).astype(np.float32)
-T = E.shape[1]; print("embeddings:", E.shape, "T =", T)
+T = E.shape[1]; print("embeddings:", E.shape)
 
-idx = np.random.permutation(len(E)); k = int(len(E)*0.8)
-tr, va = idx[:k], idx[k:]
-net = nn.Sequential(nn.Flatten(), nn.Linear(T*96,64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64,1), nn.Sigmoid())
-opt = torch.optim.Adam(net.parameters(), 1e-3)
-Et, Yt = torch.tensor(E), torch.tensor(Y)
-wpos = float(min((Y==0).sum()/max(1,Y.sum()), 3))
-for ep in range(120):
-    net.train(); p = np.random.permutation(tr)
-    for i in range(0, len(p), 128):
-        b = p[i:i+128]; o = net(Et[b]).squeeze(1)
-        w = torch.where(Yt[b]==1, torch.tensor(wpos), torch.tensor(1.0))
-        loss = nn.functional.binary_cross_entropy(o, Yt[b], weight=w)
-        opt.zero_grad(); loss.backward(); opt.step()
-net.eval()
-with torch.no_grad(): pv = net(Et[va]).squeeze(1).numpy()
-yv = Y[va]; res = []
-for th in [0.5,0.8,0.9,0.95]:
-    rec = (pv[yv==1]>th).mean(); fp = (pv[yv==0]>th).mean()
-    res.append(f"limiar {th}: recall={rec:.3f} falso_positivo={fp:.4f}")
-print("\n".join(res)); open('out/metrics.txt','w').write(f"T={T}\n"+"\n".join(res))
+def fit(Ei, Yi, epochs=40):
+    net = nn.Sequential(nn.Flatten(), nn.Linear(T*96,64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64,1), nn.Sigmoid())
+    opt = torch.optim.Adam(net.parameters(), 1e-3, weight_decay=1e-4)
+    Et, Yt = torch.tensor(Ei), torch.tensor(Yi)
+    for ep in range(epochs):
+        net.train(); p = np.random.permutation(len(Ei))
+        for i in range(0, len(p), 128):
+            b = p[i:i+128]; loss = nn.functional.binary_cross_entropy(net(Et[b]).squeeze(1), Yt[b])
+            opt.zero_grad(); loss.backward(); opt.step()
+    net.eval(); return net
+def score(net, Ei):
+    with torch.no_grad(): return net(torch.tensor(Ei)).squeeze(1).numpy()
+def train_mined(idx):
+    net = fit(E[idx], Y[idx]); p = score(net, E[idx])
+    hard = idx[(Y[idx]==0) & (p>0.4)]; print("negativos dificeis:", len(hard))
+    return fit(E[np.concatenate([idx]+[hard]*5)], Y[np.concatenate([idx]+[hard]*5)])
+
+tr = np.where(np.isin(G, ['synth','voz','neglong_train']))[0]
+net = train_mined(tr)
+lines = [f"T={T}"]
+pos = np.where(G=='t_lain')[0]
+for name, ids in [('t_neg', np.where(G=='t_neg')[0]), ('neglong_hold', np.where(G=='neglong_hold')[0])]:
+    pn = score(net, E[ids]); pp = score(net, E[pos]) if len(pos) else np.array([0.])
+    for th in [0.5,0.8,0.9,0.95,0.99]:
+        lines.append(f"[{name}] limiar {th}: recall(t_lain)={(pp>th).mean():.3f} falso_positivo/janela={(pn>th).mean():.4f}")
+print("\n".join(lines)); open('out/metrics.txt','w').write("\n".join(lines))
+
+al = np.arange(len(E)); net = train_mined(al)
 torch.onnx.export(net, torch.zeros(1,T,96), 'out/lain_head.onnx', input_names=['emb'],
                   output_names=['p'], opset_version=13, dynamo=False)
-print("ok")
+print("ok final")
