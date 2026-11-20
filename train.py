@@ -71,7 +71,8 @@ def raw(chunk, gain=None):
 def place(word, ctx=None):
     w = word[:WIN-4000]
     base = np.zeros(WIN, np.float32) if ctx is None else ctx.copy()
-    end = random.randint(int(WIN*0.7), WIN-800)
+    end = random.randint(max(int(WIN*0.7), len(w)), WIN-800)
+    end = max(end, len(w))
     base[end-len(w):end] = w
     return base
 
